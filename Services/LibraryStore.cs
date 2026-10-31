@@ -109,16 +109,16 @@ public sealed class LibraryStore
 
     public string SteamGridDbApiKey
     {
-        get => _data.SteamGridDbApiKey ?? string.Empty;
+        get => Decrypt(_data.SteamGridDbApiKey);
         set
         {
             var key = value?.Trim() ?? string.Empty;
-            if (string.Equals(_data.SteamGridDbApiKey, key, StringComparison.Ordinal))
+            if (string.Equals(Decrypt(_data.SteamGridDbApiKey), key, StringComparison.Ordinal))
             {
                 return;
             }
 
-            _data.SteamGridDbApiKey = key;
+            _data.SteamGridDbApiKey = string.IsNullOrEmpty(key) ? null : Encrypt(key);
             Save();
         }
     }
@@ -661,6 +661,47 @@ public sealed class LibraryStore
         {
             return null;
         }
+    }
+
+    private static string Decrypt(string? stored)
+    {
+        if (string.IsNullOrEmpty(stored))
+        {
+            return string.Empty;
+        }
+
+        // Legacy (pre-DPAPI) builds stored the key in plain text. Keep
+        // reading it so existing users are not locked out; it is re-encrypted
+        // on the next save.
+        if (!stored.StartsWith("enc:", StringComparison.Ordinal))
+        {
+            return stored;
+        }
+
+        try
+        {
+            var bytes = Convert.FromBase64String(stored.Substring(4));
+            var plain = ProtectedData.Unprotect(bytes, null, DataProtectionScope.CurrentUser);
+            return Encoding.UTF8.GetString(plain);
+        }
+        catch
+        {
+            return string.Empty;
+        }
+    }
+
+    private static string? Encrypt(string key)
+    {
+        if (string.IsNullOrEmpty(key))
+        {
+            return null;
+        }
+
+        var bytes = ProtectedData.Protect(
+            Encoding.UTF8.GetBytes(key),
+            null,
+            DataProtectionScope.CurrentUser);
+        return "enc:" + Convert.ToBase64String(bytes);
     }
 
     private static LibraryData Load(string path)
